@@ -70,7 +70,7 @@
         <button type="button" class="secondary" id="cancel" hidden>ยกเลิกการแก้ไข</button>
       </form>
       <div class="legend"><span><i class="dot" style="background:#64748b"></i>ยังไม่สำรวจ</span><span><i class="dot" style="background:#16a34a"></i>ปกติ</span><span><i class="dot" style="background:#f59e0b"></i>เฝ้าระวัง</span><span><i class="dot" style="background:#dc2626"></i>น้ำท่วม</span></div>
-      <small id="rain-live-status">กำลังดึงข้อมูลฝนจริงของสถานีบ้านตลาดนาทวี…</small>
+      <small id="rain-live-status">กำลังดึงข้อมูลสถานีวัดฝนใกล้เคียงจาก FloodKTW…</small>
       <div id="points"></div>
       <small>สถานะเป็นข้อมูลที่ผู้ใช้กรอกเอง ไม่ใช่การแจ้งเตือนน้ำท่วมแบบเรียลไทม์ ข้อมูลสถานีเป็นพิกัดตามทะเบียน ไม่ใช่ปริมาณฝนสด ข้อมูลถนนและทางน้ำมาจาก OpenStreetMap และเก็บไว้ในเครื่อง ไม่อัปเดตอัตโนมัติ</small>
     </aside>
@@ -98,12 +98,28 @@
     const rainFeedUrl = 'https://itskb-room.github.io/FloodKTW/data/latest.json';
     const rainFreshHours = 6;
     let liveRain = null;
+    function liveStations() {
+      if (!liveRain) return [];
+      const rows = [...liveRain.janah, ...liveRain.nathawi];
+      const unique = new Map();
+      for (const s of rows) {
+        if (!Number.isFinite(Number(s.lat)) || !Number.isFinite(Number(s.lon))) continue;
+        const id = String(s.station_id ?? s.station_code ?? `${s.lat},${s.lon}`);
+        if (!unique.has(id)) unique.set(id, {
+          code: id === '2012' ? '58048' : `live-${id}`,
+          stationId: id, name: s.name || 'สถานีวัดฝน', lat: Number(s.lat), lng: Number(s.lon),
+          district: 'อ.สงขลา', tambon: s.tambon || '', stationCode: s.station_code || '',
+          rain24: Number.isFinite(Number(s.rain_24h)) && Number(s.rain_24h) >= 0 ? Number(s.rain_24h) : null,
+          rain1: Number.isFinite(Number(s.rain_1h)) && Number(s.rain_1h) >= 0 ? Number(s.rain_1h) : null,
+          datetime: s.datetime || '', source: 'FloodKTW'
+        });
+      }
+      return [...unique.values()];
+    }
     function targetRainReading(code) {
-      if (code !== '58048' || !Array.isArray(liveRain?.stations)) return null;
-      return liveRain.stations.find(s =>
-        String(s.station_id) === '2012' ||
-        (String(s.name || '').includes('บ้านตลาดนาทวี') && String(s.tambon || '').includes('นาทวี'))
-      ) || null;
+      if (code !== '58048') return null;
+      return liveStations().find(s => s.stationId === '2012' ||
+        (String(s.name || '').includes('บ้านตลาดนาทวี') && String(s.tambon || '').includes('นาทวี'))) || null;
     }
     function rainDescription(code) {
       if (code === '58048') {
@@ -111,7 +127,7 @@
         if (!reading) return 'ฝน 24 ชม. บ้านตลาดนาทวี: ยังไม่มีรายงานจากแหล่งข้อมูล';
         const age = reading.datetime ? Math.max(0, (Date.now() - parseObservedTime(reading.datetime).getTime()) / 3600000) : null;
         const old = age !== null && age > rainFreshHours ? ` · ข้อมูลเก่า ${age.toFixed(1)} ชม.` : '';
-        return `ฝน 24 ชม.: ${Number(reading.rain_24h).toFixed(1)} มม. · บ้านตลาดนาทวี (${reading.tambon || 'ต.นาทวี'}) · วัด ${reading.datetime || 'ไม่ระบุเวลา'}${old} · FloodKTW`;
+        return `ฝน 24 ชม.: ${Number(reading.rain24).toFixed(1)} มม. · บ้านตลาดนาทวี (${reading.tambon || 'ต.นาทวี'}) · วัด ${reading.datetime || 'ไม่ระบุเวลา'}${old} · FloodKTW`;
       }
       return 'ยังไม่มีข้อมูลสดของสถานีนี้ใน FloodKTW';
     }
@@ -128,14 +144,17 @@
         const response = await fetch(`${rainFeedUrl}?t=${Date.now()}`, { cache: 'no-store' });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        const stations = data?.rain_observed?.nathawi?.stations;
-        if (!Array.isArray(stations)) throw new Error('ฟีดยังไม่มีข้อมูลแยกรายสถานี');
-        liveRain = { stations, generatedAt: data.generated_at_th || data.generated_at || '' };
+        const nathawi = data?.rain_observed?.nathawi?.stations;
+        const janah = data?.rain_observed?.janah?.stations;
+        if (!Array.isArray(nathawi) && !Array.isArray(janah)) throw new Error('ฟีดยังไม่มีข้อมูลแยกรายสถานี');
+        liveRain = { nathawi: Array.isArray(nathawi) ? nathawi : [], janah: Array.isArray(janah) ? janah : [], generatedAt: data.generated_at_th || data.generated_at || '' };
         const target = targetRainReading('58048');
-        if (!target || !Number.isFinite(Number(target.rain_24h)) || Number(target.rain_24h) < 0 || !parseObservedTime(target.datetime)) throw new Error('ฟีดยังไม่มีรายงานของบ้านตลาดนาทวี');
-        const ageHours = Math.max(0, (Date.now() - parseObservedTime(target.datetime).getTime()) / 3600000);
-        const staleness = ageHours > rainFreshHours ? `ข้อมูลเก่า ${ageHours.toFixed(1)} ชั่วโมง` : 'ข้อมูลวัดจริง';
-        status.textContent = `บ้านตลาดนาทวี · ฝน 24 ชม. ${Number(target.rain_24h).toFixed(1)} มม. · วัด ${target.datetime} · ${staleness} · อัปเดตฟีด ${liveRain.generatedAt} · รีเฟรชทุก 5 นาที`;
+        const targetValid = target && Number.isFinite(target.rain24) && target.rain24 >= 0 && parseObservedTime(target.datetime);
+        if (targetValid) {
+          const ageHours = Math.max(0, (Date.now() - parseObservedTime(target.datetime).getTime()) / 3600000);
+          const staleness = ageHours > rainFreshHours ? `ข้อมูลเก่า ${ageHours.toFixed(1)} ชั่วโมง` : 'ข้อมูลวัดจริง';
+          status.textContent = `พบสถานีมีพิกัด ${liveStations().length} แห่ง · บ้านตลาดนาทวี ${target.rain24.toFixed(1)} มม./24 ชม. · วัด ${target.datetime} · ${staleness} · อัปเดตฟีด ${liveRain.generatedAt} · รีเฟรชทุก 5 นาที`;
+        } else status.textContent = `พบสถานีมีพิกัด ${liveStations().length} แห่ง · ฟีดยังไม่มีค่ารายงานบ้านตลาดนาทวี · อัปเดตฟีด ${liveRain.generatedAt} · รีเฟรชทุก 5 นาที`;
         renderRainStations();
         render();
       } catch (error) {
@@ -171,34 +190,46 @@
       return 12742 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
     function nearestStation(p) {
-      return rainStations.map(station => ({ station, km: distanceKm(p.lat, p.lng, station.lat, station.lng) })).sort((a, b) => a.km - b.km)[0];
+      const stations = [...liveStations()];
+      for (const fixed of rainStations) if (!stations.some(s => distanceKm(s.lat, s.lng, fixed.lat, fixed.lng) < 0.5)) stations.push(fixed);
+      return stations.map(station => ({ station, km: distanceKm(p.lat, p.lng, station.lat, station.lng) })).sort((a, b) => a.km - b.km)[0];
     }
     const rainLayer = L.layerGroup().addTo(map);
     const rainMarkers = new Map();
     function renderRainStations() {
       rainLayer.clearLayers();
       rainMarkers.clear();
-      for (const station of rainStations) {
-        const reading = targetRainReading(station.code);
-        const iconText = reading ? `${Number(reading.rain_24h).toFixed(1)} มม.` : '💧';
+      const dynamic = liveStations();
+      const stations = [...dynamic];
+      for (const fixed of rainStations) {
+        if (!stations.some(s => distanceKm(s.lat, s.lng, fixed.lat, fixed.lng) < 0.5)) stations.push(fixed);
+      }
+      for (const station of stations) {
+        const isMarketStation = station.stationId === '2012' || station.code === '58048';
+        const iconText = station.rain24 !== null && station.rain24 !== undefined ? `${station.rain24.toFixed(1)} มม.` : '💧';
         const icon = L.divIcon({
           className: 'leaflet-div-icon',
-          html: `<span class="rain-marker${reading ? ' has-value' : ''}">${iconText}</span>`,
-          iconSize: [reading ? 60 : 32, 32], iconAnchor: [reading ? 30 : 16, 16]
+          html: `<span class="rain-marker${station.rain24 !== null && station.rain24 !== undefined ? ' has-value' : ''}">${iconText}</span>`,
+          iconSize: [station.rain24 !== null && station.rain24 !== undefined ? 60 : 32, 32], iconAnchor: [station.rain24 !== null && station.rain24 !== undefined ? 30 : 16, 16]
         });
-        const marker = L.marker([station.lat, station.lng], { icon, title: `สถานีวัดน้ำฝน ${station.name}` }).addTo(rainLayer);
+        const marker = L.marker([station.lat, station.lng], { icon, title: `สถานีวัดน้ำฝน ${station.name}${station.rain24 !== null && station.rain24 !== undefined ? ` ${station.rain24.toFixed(1)} มม.` : ''}` }).addTo(rainLayer);
         rainMarkers.set(station.code, marker);
         const popup = document.createElement('div');
         const title = document.createElement('strong'); title.textContent = `สถานีวัดน้ำฝน ${station.name}`;
-        const details = document.createElement('p'); details.textContent = `รหัส ${station.code} · ${station.district} · ${station.period} · ${station.lat.toFixed(6)}, ${station.lng.toFixed(6)}`;
-        const value = document.createElement('p'); value.textContent = rainDescription(station.code);
+        const details = document.createElement('p'); details.textContent = `${station.stationCode ? `รหัส ${station.stationCode} · ` : ''}${station.tambon ? `ต.${station.tambon} · ` : ''}${station.district || 'จ.สงขลา'} · ${station.period || ''} · ${station.lat.toFixed(6)}, ${station.lng.toFixed(6)}`;
+        const value = document.createElement('p');
+        value.textContent = station.rain24 !== null && station.rain24 !== undefined
+          ? `ฝนสะสม 24 ชม.: ${station.rain24.toFixed(1)} มม. · วัด ${station.datetime || 'ไม่ระบุเวลา'}${station.source ? ` · ${station.source}` : ''}`
+          : 'ไม่มีค่าฝนรายงานสำหรับสถานีนี้';
         const caveat = document.createElement('p');
-        caveat.textContent = station.code === '58048'
+        caveat.textContent = isMarketStation
           ? 'จับคู่กับสถานีบ้านตลาดนาทวี · ต.นาทวี (รหัสแหล่งข้อมูล ThaiWater 2012 / STN0845) พิกัดตรงกับ X.282 ในทะเบียนโดยประมาณ'
-          : 'ค่าฝนรายสถานีจะแสดงเมื่อฟีดมีรายงานของสถานีนี้';
+          : station.stationId ? 'ตำแหน่งและค่าจากฟีด FloodKTW · อัปเดตตามรอบข้อมูลของแหล่งต้นทาง' : 'ตำแหน่งอ้างอิงจากทะเบียนสถานี · ไม่มีข้อมูลสดของสถานีนี้ในฟีด';
         popup.append(title, details, value, caveat);
-        const source = document.createElement('a'); source.href = stationSource; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'ทะเบียนสถานี กรมชลประทาน (PDF)';
-        popup.append(source);
+        if (!station.stationId) {
+          const source = document.createElement('a'); source.href = stationSource; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'ทะเบียนสถานี กรมชลประทาน (PDF)';
+          popup.append(source);
+        }
         marker.bindPopup(popup);
       }
     }
@@ -296,9 +327,12 @@
         row.append(heading, info);
         const closest = nearestStation(p);
         const rainInfo = document.createElement('div'); rainInfo.className = 'rain-info';
-        const rainTitle = document.createElement('strong'); rainTitle.textContent = `💧 สถานีวัดฝนที่ยังดำเนินงานใกล้สุด: ${closest.station.name}`;
-        const rainDetails = document.createElement('p'); rainDetails.textContent = `รหัส ${closest.station.code} · ระยะทางตรง ${closest.km.toFixed(1)} กม. · ${closest.station.district} · ${closest.station.period}`;
-        const rainfallValue = document.createElement('p'); rainfallValue.textContent = rainDescription(closest.station.code);
+        const rainTitle = document.createElement('strong'); rainTitle.textContent = `💧 สถานีวัดฝนใกล้สุด: ${closest.station.name}`;
+        const rainDetails = document.createElement('p'); rainDetails.textContent = `${closest.station.stationCode ? `รหัส ${closest.station.stationCode} · ` : ''}ระยะทางตรง ${closest.km.toFixed(1)} กม. · ${closest.station.tambon ? `ต.${closest.station.tambon}` : closest.station.district || 'จ.สงขลา'}`;
+        const rainfallValue = document.createElement('p');
+        rainfallValue.textContent = closest.station.rain24 !== null && closest.station.rain24 !== undefined
+          ? `ฝน 24 ชม.: ${closest.station.rain24.toFixed(1)} มม. · วัด ${closest.station.datetime || 'ไม่ระบุเวลา'}`
+          : 'ไม่มีค่าฝนสดของสถานีนี้';
         const rainSource = document.createElement('a'); rainSource.href = stationSource; rainSource.target = '_blank'; rainSource.rel = 'noopener noreferrer'; rainSource.textContent = 'แหล่งข้อมูลสถานี';
         rainInfo.append(rainTitle, rainDetails, rainfallValue, rainSource);
         row.append(rainInfo);
