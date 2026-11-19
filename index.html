@@ -176,12 +176,16 @@
     const map = L.map('map').setView([initial.lat, initial.lng], 14);
     L.geoJSON(window.OFFLINE_MAP, {
       interactive: false,
+      filter: feature => {
+        const t = feature.properties;
+        return t.waterway || t.natural === 'water' ||
+          ['motorway', 'trunk', 'primary', 'secondary', 'tertiary'].includes(t.highway);
+      },
       style: feature => {
         const t = feature.properties;
         if (t.waterway || t.natural === 'water') return { color: '#60aee0', weight: t.waterway === 'river' ? 3 : 2, opacity: 0.9 };
         if (['motorway', 'trunk', 'primary'].includes(t.highway)) return { color: '#db9054', weight: 4, opacity: 0.9 };
         if (['secondary', 'tertiary'].includes(t.highway)) return { color: '#e0ad70', weight: 3, opacity: 0.9 };
-        return { color: '#b6aca0', weight: 1.6, opacity: 0.8 };
       }
     }).addTo(map);
     map.attributionControl.addAttribution('Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors');
