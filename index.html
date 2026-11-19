@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>แผนที่เฝ้าระวังน้ำท่วม</title>
+  <link rel="stylesheet" href="vendor/leaflet.css">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; color: #17324a; background: #f2f7fa; }
+    header { padding: 18px 24px; background: #123b56; color: white; }
+    h1 { margin: 0 0 4px; font-size: 1.35rem; }
+    header p { margin: 0; color: #d6e9f3; font-size: .9rem; }
+    main { display: grid; grid-template-columns: minmax(260px, 330px) 1fr; min-height: calc(100vh - 85px); }
+    aside { padding: 20px; overflow-y: auto; background: white; box-shadow: 2px 0 8px #17324a14; z-index: 500; }
+    #map { min-height: 600px; background: #f6f4ec; }
+    h2 { margin: 0 0 10px; font-size: 1.1rem; }
+    .hint, small { color: #526778; font-size: .85rem; line-height: 1.5; }
+    .hint { margin: 0 0 18px; }
+    label { display: block; margin: 12px 0 5px; font-weight: 600; font-size: .9rem; }
+    input, select, textarea, button { width: 100%; font: inherit; border-radius: 7px; }
+    input, select, textarea { padding: 9px; border: 1px solid #b6c8d2; background: white; }
+    textarea { resize: vertical; }
+    button { padding: 10px; margin-top: 12px; border: 0; cursor: pointer; background: #087da3; color: white; font-weight: 600; }
+    button:hover { background: #075f7c; }
+    button.secondary { background: #e5eff4; color: #17324a; }
+    button.danger { background: #a33535; }
+    .coords { padding: 9px; margin-top: 12px; background: #eef6fa; border-radius: 7px; font-size: .85rem; }
+    .point { padding: 12px 0; border-bottom: 1px solid #e1eaf0; }
+    .point button { width: auto; padding: 5px 10px; margin: 5px 6px 0 0; font-size: .8rem; }
+    .point p { margin: 5px 0; font-size: .85rem; overflow-wrap: anywhere; }
+    .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; border: 2px solid white; box-shadow: 0 0 0 1px #567; }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; font-size: .85rem; }
+    .leaflet-div-icon { background: transparent; border: 0; }
+    .marker { display: block; width: 20px; height: 20px; border: 3px solid white; border-radius: 50%; box-shadow: 0 1px 6px #123b5677; }
+    .flag-marker { position: relative; display: grid; place-items: center; width: 42px; height: 42px; background: #174c76; border: 3px solid white; border-radius: 10px; box-shadow: 0 2px 9px #123b5688; color: white; font-size: 18px; font-weight: bold; line-height: 1; }
+    .flag-marker::after { content: ''; position: absolute; left: 17px; top: 37px; width: 4px; height: 17px; background: #174c76; box-shadow: 0 1px 3px #123b5688; }
+    .flag-marker span { position: relative; z-index: 1; }
+    .flag-marker .flag-symbol { font-size: 23px; }
+    .flag-marker.primary { border-color: #facc15; box-shadow: 0 0 0 4px #facc1555, 0 2px 9px #123b5688; }
+    .flag-marker.primary .flag-symbol { color: #facc15 !important; }
+    .rain-marker { display: grid; place-items: center; width: 32px; height: 32px; border: 2px solid white; border-radius: 50%; background: #2563eb; color: white; box-shadow: 0 1px 7px #123b5688; font-size: 19px; }
+    .rain-info { padding: 8px; margin: 6px 0; background: #eef5ff; border-radius: 7px; }
+    @media (max-width: 700px) { main { display: flex; flex-direction: column; } aside { order: 2; } #map { height: 55vh; min-height: 350px; } }
+  </style>
+</head>
+<body>
+  <header><h1>แผนที่เฝ้าระวังน้ำท่วม</h1><p>บันทึกจุดและสถานการณ์จากการสำรวจในพื้นที่</p></header>
+  <main>
+    <aside>
+      <h2>จุดเฝ้าระวัง</h2>
+      <p class="hint">คลิกบนแผนที่เพื่อเลือกพิกัด หรือเลือกจุดเดิมแล้วลากหมุด/แก้ค่าพิกัดในช่องด้านล่าง กดบันทึกเพื่อยืนยัน ข้อมูลเก็บในเบราว์เซอร์เครื่องนี้เท่านั้น</p>
+      <form id="point-form">
+        <label for="name">ชื่อจุด</label><input id="name" required maxlength="100" placeholder="เช่น สะพาน / ถนน / ชุมชน">
+        <label for="status">สถานะจากการสำรวจ</label>
+        <select id="status"><option value="unknown">ยังไม่สำรวจ</option><option value="normal">ปกติ</option><option value="watch">เฝ้าระวัง</option><option value="flood">น้ำท่วม</option></select>
+        <label for="note">บันทึกเพิ่มเติม</label><textarea id="note" rows="3" maxlength="500" placeholder="ระดับน้ำ เวลา หรือรายละเอียดที่พบ"></textarea>
+        <label for="latitude">ละติจูด (Latitude)</label><input id="latitude" type="number" step="any" min="-90" max="90" placeholder="คลิกแผนที่หรือกรอกพิกัด">
+        <label for="longitude">ลองจิจูด (Longitude)</label><input id="longitude" type="number" step="any" min="-180" max="180" placeholder="คลิกแผนที่หรือกรอกพิกัด">
+        <div class="coords" id="coords">พิกัด: คลิกเลือกบนแผนที่หรือกรอกด้านบน</div>
+        <button type="submit" id="save">บันทึกจุด</button>
+        <button type="button" class="secondary" id="cancel" hidden>ยกเลิกการแก้ไข</button>
+      </form>
+      <div class="legend"><span><i class="dot" style="background:#64748b"></i>ยังไม่สำรวจ</span><span><i class="dot" style="background:#16a34a"></i>ปกติ</span><span><i class="dot" style="background:#f59e0b"></i>เฝ้าระวัง</span><span><i class="dot" style="background:#dc2626"></i>น้ำท่วม</span></div>
+      <small>หมุดสีน้ำเงิน 💧 = สถานีวัดน้ำฝน คลิกเพื่อดูรายละเอียด</small>
+      <div id="points"></div>
+      <small>สถานะเป็นข้อมูลที่ผู้ใช้กรอกเอง ไม่ใช่การแจ้งเตือนน้ำท่วมแบบเรียลไทม์ ข้อมูลสถานีเป็นพิกัดตามทะเบียน ไม่ใช่ปริมาณฝนสด ข้อมูลถนนและทางน้ำมาจาก OpenStreetMap และเก็บไว้ในเครื่อง ไม่อัปเดตอัตโนมัติ</small>
+    </aside>
+    <div id="map" aria-label="แผนที่จุดเฝ้าระวังน้ำท่วม"></div>
+  </main>
+  <script src="vendor/leaflet.js"></script>
+  <script src="offline-map.js"></script>
+  <script>
+    const initial = { id: 'start', name: 'จุดที่ 1', lat: 6.738520313011351, lng: 100.57600110769273, status: 'unknown', note: '', updated: '' };
+    const primaryPoint = { id: 'songkhla-biomass', name: 'จุดหลัก: โรงไฟฟ้า สงขลาไบโอ แมส จำกัด', lat: 6.79313871543532, lng: 100.70504364225182, status: 'unknown', note: '', updated: '' };
+    const startingPoints = [
+      primaryPoint,
+      initial,
+      { id: 'point-2', name: 'จุดที่ 2', lat: 6.7176507320317445, lng: 100.6838963181718, status: 'unknown', note: '', updated: '' },
+      { id: 'point-3', name: 'จุดที่ 3', lat: 6.779837360845242, lng: 100.70344417533536, status: 'unknown', note: '', updated: '' }
+    ];
+    const labels = { unknown: 'ยังไม่สำรวจ', normal: 'ปกติ', watch: 'เฝ้าระวัง', flood: 'น้ำท่วม' };
+    const colors = { unknown: '#64748b', normal: '#16a34a', watch: '#f59e0b', flood: '#dc2626' };
+    // Royal Irrigation Department, Long List of Rainfall Stations (2026), Songkhla, p. 103.
+    const rainStations = [
+      { code: '58048', name: 'บ้านนาทวี (X.282)', lat: 6.741401, lng: 100.694839, district: 'อ.นาทวี จ.สงขลา', period: 'พ.ศ. 2562–ปัจจุบัน (ตามทะเบียนปี 2569)' },
+      { code: '58046', name: 'สถานีอุตุนิยมวิทยาอุทกสะเดา', lat: 6.789239, lng: 100.409727, district: 'อ.สะเดา จ.สงขลา', period: 'พ.ศ. 2547–ปัจจุบัน (ตามทะเบียนปี 2569)' }
+    ];
+    const stationSource = 'https://water.rid.go.th/hydrology/rain/images/Longlist_Rainfall.pdf#page=110';
+    const storageKey = 'flood-watch-points-v1';
+    let points;
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey));
+      points = Array.isArray(saved) ? saved.filter(p => p && typeof p.id === 'string' && Number.isFinite(p.lat) && Number.isFinite(p.lng) && p.lat >= -90 && p.lat <= 90 && p.lng >= -180 && p.lng <= 180) : [...startingPoints];
+    } catch { points = [...startingPoints]; }
+    for (const p of startingPoints) if (!points.some(item => item.id === p.id)) points.push(p);
+
+    const map = L.map('map').setView([initial.lat, initial.lng], 14);
+    L.geoJSON(window.OFFLINE_MAP, {
+      interactive: false,
+      style: feature => {
+        const t = feature.properties;
+        if (t.waterway || t.natural === 'water') return { color: '#60aee0', weight: t.waterway === 'river' ? 3 : 2, opacity: 0.9 };
+        if (['motorway', 'trunk', 'primary'].includes(t.highway)) return { color: '#db9054', weight: 4, opacity: 0.9 };
+        if (['secondary', 'tertiary'].includes(t.highway)) return { color: '#e0ad70', weight: 3, opacity: 0.9 };
+        return { color: '#b6aca0', weight: 1.6, opacity: 0.8 };
+      }
+    }).addTo(map);
+    map.attributionControl.addAttribution('Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors');
+    function distanceKm(lat1, lng1, lat2, lng2) {
+      const rad = Math.PI / 180, dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad;
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
+      return 12742 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+    function nearestStation(p) {
+      return rainStations.map(station => ({ station, km: distanceKm(p.lat, p.lng, station.lat, station.lng) })).sort((a, b) => a.km - b.km)[0];
+    }
+    const rainLayer = L.layerGroup().addTo(map);
+    for (const station of rainStations) {
+      const marker = L.marker([station.lat, station.lng], {
+        icon: L.divIcon({ className: 'leaflet-div-icon', html: '<span class="rain-marker">💧</span>', iconSize: [32, 32], iconAnchor: [16, 16] }),
+        title: `สถานีวัดน้ำฝน ${station.name}`
+      }).addTo(rainLayer);
+      const popup = document.createElement('div');
+      const title = document.createElement('strong'); title.textContent = `สถานีวัดน้ำฝน ${station.name}`;
+      const details = document.createElement('p'); details.textContent = `รหัส ${station.code} · ${station.district} · ${station.period} · ${station.lat.toFixed(6)}, ${station.lng.toFixed(6)}`;
+      const source = document.createElement('a'); source.href = stationSource; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'ทะเบียนสถานี กรมชลประทาน (PDF)';
+      popup.append(title, details, source);
+      marker.bindPopup(popup);
+    }
+    const layer = L.layerGroup().addTo(map);
+    const form = document.getElementById('point-form');
+    const coords = document.getElementById('coords');
+    const latitude = document.getElementById('latitude');
+    const longitude = document.getElementById('longitude');
+    let selected = null;
+    let editing = null;
+    const markers = new Map();
+
+    function persist() {
+      try { localStorage.setItem(storageKey, JSON.stringify(points)); }
+      catch { alert('ไม่สามารถบันทึกข้อมูลในเบราว์เซอร์ได้ โปรดตรวจสอบพื้นที่จัดเก็บ'); }
+    }
+    function choose(lat, lng) {
+      selected = { lat, lng };
+      latitude.value = lat.toFixed(8);
+      longitude.value = lng.toFixed(8);
+      coords.textContent = `พิกัด: ${lat.toFixed(7)}, ${lng.toFixed(7)}`;
+      if (editing && markers.has(editing)) markers.get(editing).setLatLng([lat, lng]);
+    }
+    function reset() {
+      form.reset(); editing = null; selected = null;
+      coords.textContent = 'พิกัด: คลิกเลือกบนแผนที่หรือกรอกด้านบน';
+      document.getElementById('save').textContent = 'บันทึกจุด';
+      document.getElementById('cancel').hidden = true;
+    }
+    function edit(id) {
+      const p = points.find(item => item.id === id);
+      if (!p) return;
+      if (editing && editing !== id) render();
+      editing = id;
+      document.getElementById('name').value = p.name;
+      document.getElementById('status').value = labels[p.status] ? p.status : 'unknown';
+      document.getElementById('note').value = p.note || '';
+      choose(p.lat, p.lng);
+      document.getElementById('save').textContent = 'บันทึกการแก้ไข';
+      document.getElementById('cancel').hidden = false;
+      map.setView([p.lat, p.lng], Math.max(map.getZoom(), 15));
+      document.getElementById('name').focus();
+    }
+    function render() {
+      layer.clearLayers();
+      markers.clear();
+      const list = document.getElementById('points');
+      list.replaceChildren();
+      for (const p of points) {
+        const startIndex = startingPoints.findIndex(item => item.id === p.id);
+        const isStartingPoint = startIndex !== -1;
+        const isPrimary = p.id === primaryPoint.id;
+        const marker = L.marker([p.lat, p.lng], {
+          icon: isStartingPoint
+            ? L.divIcon({ className: 'leaflet-div-icon', html: `<span class="flag-marker${isPrimary ? ' primary' : ''}"><span><span class="flag-symbol" style="color:${colors[p.status] || colors.unknown}">${isPrimary ? '★' : '⚑'}</span>${isPrimary ? '' : startIndex}</span></span>`, iconSize: [42, 59], iconAnchor: [21, 59], popupAnchor: [0, -52] })
+            : L.divIcon({ html: `<span class="marker" style="background:${colors[p.status] || colors.unknown}"></span>`, iconSize: [20, 20], iconAnchor: [10, 10] }),
+          zIndexOffset: isStartingPoint ? 1000 : 0,
+          draggable: true,
+          title: `${p.name} (ลากเพื่อแก้พิกัด)`
+        }).addTo(layer);
+        markers.set(p.id, marker);
+        const popup = document.createElement('div');
+        const title = document.createElement('strong'); title.textContent = p.name;
+        const detail = document.createElement('p'); detail.textContent = `${labels[p.status] || labels.unknown}${p.note ? ' — ' + p.note : ''}`;
+        popup.append(title, detail);
+        marker.bindPopup(popup);
+        marker.on('click', () => edit(p.id));
+        marker.on('dragend', () => {
+          const position = marker.getLatLng();
+          edit(p.id);
+          choose(position.lat, position.lng);
+          map.panTo(position);
+        });
+
+        const row = document.createElement('div'); row.className = 'point';
+        const heading = document.createElement('strong');
+        const dot = document.createElement('i'); dot.className = 'dot'; dot.style.background = colors[p.status] || colors.unknown;
+        heading.append(dot, document.createTextNode(p.name));
+        const info = document.createElement('p'); info.textContent = `${labels[p.status] || labels.unknown} · ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
+        row.append(heading, info);
+        const closest = nearestStation(p);
+        const rainInfo = document.createElement('div'); rainInfo.className = 'rain-info';
+        const rainTitle = document.createElement('strong'); rainTitle.textContent = `💧 สถานีวัดฝนที่ยังดำเนินงานใกล้สุด: ${closest.station.name}`;
+        const rainDetails = document.createElement('p'); rainDetails.textContent = `รหัส ${closest.station.code} · ระยะทางตรง ${closest.km.toFixed(1)} กม. · ${closest.station.district} · ${closest.station.period}`;
+        const rainSource = document.createElement('a'); rainSource.href = stationSource; rainSource.target = '_blank'; rainSource.rel = 'noopener noreferrer'; rainSource.textContent = 'แหล่งข้อมูลสถานี';
+        rainInfo.append(rainTitle, rainDetails, rainSource);
+        row.append(rainInfo);
+        if (p.updated) { const time = document.createElement('p'); time.textContent = `อัปเดต: ${new Date(p.updated).toLocaleString('th-TH')}`; row.append(time); }
+        const button = document.createElement('button'); button.className = 'secondary'; button.textContent = 'ดู / แก้ไข'; button.onclick = () => edit(p.id); row.append(button);
+        if (!startingPoints.some(item => item.id === p.id)) {
+          const remove = document.createElement('button'); remove.className = 'danger'; remove.textContent = 'ลบ';
+          remove.onclick = () => { if (confirm(`ลบจุด “${p.name}” หรือไม่?`)) { points = points.filter(item => item.id !== p.id); persist(); reset(); render(); } };
+          row.append(remove);
+        }
+        list.append(row);
+      }
+    }
+    map.on('click', e => choose(e.latlng.lat, e.latlng.lng));
+    function coordinatesFromFields() {
+      if (latitude.value.trim() === '' || longitude.value.trim() === '') return null;
+      const lat = Number(latitude.value), lng = Number(longitude.value);
+      return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 ? { lat, lng } : null;
+    }
+    function updateFromFields() {
+      const position = coordinatesFromFields();
+      if (!position) { coords.textContent = 'พิกัดไม่ถูกต้อง: ละติจูด -90 ถึง 90, ลองจิจูด -180 ถึง 180'; return; }
+      choose(position.lat, position.lng);
+      map.panTo(position);
+    }
+    latitude.addEventListener('input', updateFromFields);
+    longitude.addEventListener('input', updateFromFields);
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const position = coordinatesFromFields();
+      if (!position) { alert('กรุณาระบุพิกัดที่ถูกต้อง'); return; }
+      const p = { id: editing || crypto.randomUUID(), name: document.getElementById('name').value.trim(), status: document.getElementById('status').value, note: document.getElementById('note').value.trim(), ...position, updated: new Date().toISOString() };
+      if (!p.name) return;
+      if (editing) points = points.map(item => item.id === editing ? p : item);
+      else points.push(p);
+      persist(); reset(); render();
+    });
+    document.getElementById('cancel').onclick = () => { reset(); render(); };
+    render();
+    map.fitBounds(L.latLngBounds(startingPoints.map(p => [p.lat, p.lng])).pad(0.2));
+  </script>
+</body>
+</html>
