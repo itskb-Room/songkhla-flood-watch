@@ -39,6 +39,10 @@
     .flag-marker .flag-symbol { font-size: 23px; }
     .flag-marker.primary { border-color: #facc15; box-shadow: 0 0 0 4px #facc1555, 0 2px 9px #123b5688; }
     .flag-marker.primary .flag-symbol { color: #facc15 !important; }
+    .leaflet-tooltip.point-label { background: #fff; color: #17324a; border: 2px solid #174c76; border-radius: 7px; box-shadow: 0 2px 7px #123b5644; font: 700 13px system-ui, sans-serif; white-space: normal; max-width: 230px; padding: 4px 8px; }
+    .leaflet-tooltip.point-label.primary-label { border-color: #eab308; }
+    .leaflet-tooltip-right.point-label::before { border-right-color: #174c76; }
+    .leaflet-tooltip-right.point-label.primary-label::before { border-right-color: #eab308; }
     .rain-marker { display: grid; place-items: center; width: 32px; height: 32px; border: 2px solid white; border-radius: 50%; background: #2563eb; color: white; box-shadow: 0 1px 7px #123b5688; font-size: 19px; }
     .rain-marker.has-value { width: auto; min-width: 48px; padding: 0 5px; font-size: 12px; white-space: nowrap; }
     .rain-info { padding: 8px; margin: 6px 0; background: #eef5ff; border-radius: 7px; }
@@ -249,6 +253,12 @@
           title: `${p.name} (ลากเพื่อแก้พิกัด)`
         }).addTo(layer);
         markers.set(p.id, marker);
+        const label = document.createElement('span'); label.textContent = p.name;
+        marker.bindTooltip(label, {
+          permanent: true, direction: 'right',
+          offset: isStartingPoint ? [21, -39] : [12, -9],
+          className: `point-label${isPrimary ? ' primary-label' : ''}`
+        });
         const popup = document.createElement('div');
         const title = document.createElement('strong'); title.textContent = p.name;
         const detail = document.createElement('p'); detail.textContent = `${labels[p.status] || labels.unknown}${p.note ? ' — ' + p.note : ''}`;
