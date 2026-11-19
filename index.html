@@ -150,8 +150,10 @@
       return rainStations.map(station => ({ station, km: distanceKm(p.lat, p.lng, station.lat, station.lng) })).sort((a, b) => a.km - b.km)[0];
     }
     const rainLayer = L.layerGroup().addTo(map);
+    const rainMarkers = new Map();
     function renderRainStations() {
       rainLayer.clearLayers();
+      rainMarkers.clear();
       for (const station of rainStations) {
         const reading = validRain(station.code);
         const iconText = reading ? `${reading.mm.toFixed(1)} มม.` : '💧';
@@ -161,6 +163,7 @@
           iconSize: [reading ? 60 : 32, 32], iconAnchor: [reading ? 30 : 16, 16]
         });
         const marker = L.marker([station.lat, station.lng], { icon, title: `สถานีวัดน้ำฝน ${station.name}` }).addTo(rainLayer);
+        rainMarkers.set(station.code, marker);
         const popup = document.createElement('div');
         const title = document.createElement('strong'); title.textContent = `สถานีวัดน้ำฝน ${station.name}`;
         const details = document.createElement('p'); details.textContent = `รหัส ${station.code} · ${station.district} · ${station.period} · ${station.lat.toFixed(6)}, ${station.lng.toFixed(6)}`;
@@ -187,6 +190,8 @@
       try { localStorage.setItem(rainStorageKey, JSON.stringify(rainReadings)); }
       catch { alert('ไม่สามารถบันทึกข้อมูลในเบราว์เซอร์ได้'); return; }
       renderRainStations(); render();
+      const station = rainStations.find(s => s.code === rainStationSelect.value);
+      showOnMap(rainMarkers.get(station.code), [station.lat, station.lng]);
     });
     document.getElementById('rain-clear').addEventListener('click', () => {
       delete rainReadings[rainStationSelect.value];
@@ -203,6 +208,12 @@
     let selected = null;
     let editing = null;
     const markers = new Map();
+
+    function showOnMap(marker, position) {
+      map.setView(position, Math.max(map.getZoom(), 16));
+      if (window.matchMedia('(max-width: 700px)').matches) document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      requestAnimationFrame(() => { map.invalidateSize(); if (marker) marker.openPopup(); });
+    }
 
     function persist() {
       try { localStorage.setItem(storageKey, JSON.stringify(points)); }
@@ -319,6 +330,7 @@
       if (editing) points = points.map(item => item.id === editing ? p : item);
       else points.push(p);
       persist(); reset(); render();
+      showOnMap(markers.get(p.id), [p.lat, p.lng]);
     });
     document.getElementById('cancel').onclick = () => { reset(); render(); };
     render();
