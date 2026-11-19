@@ -71,6 +71,7 @@
       </form>
       <div class="legend"><span><i class="dot" style="background:#64748b"></i>ยังไม่สำรวจ</span><span><i class="dot" style="background:#16a34a"></i>ปกติ</span><span><i class="dot" style="background:#f59e0b"></i>เฝ้าระวัง</span><span><i class="dot" style="background:#dc2626"></i>น้ำท่วม</span></div>
       <small id="rain-live-status">กำลังดึงข้อมูลสถานีวัดฝนใกล้เคียงจาก FloodKTW…</small>
+      <button type="button" class="secondary" id="fit-coverage">แสดงจุดเฝ้าระวังและสถานีฝนทั้งหมด</button>
       <div id="points"></div>
       <small>สถานะเป็นข้อมูลที่ผู้ใช้กรอกเอง ไม่ใช่การแจ้งเตือนน้ำท่วมแบบเรียลไทม์ ข้อมูลสถานีเป็นพิกัดตามทะเบียน ไม่ใช่ปริมาณฝนสด ข้อมูลถนนและทางน้ำมาจาก OpenStreetMap และเก็บไว้ในเครื่อง ไม่อัปเดตอัตโนมัติ</small>
     </aside>
@@ -100,15 +101,14 @@
     let liveRain = null;
     function liveStations() {
       if (!liveRain) return [];
-      const rows = [...liveRain.janah, ...liveRain.nathawi];
       const unique = new Map();
-      for (const s of rows) {
+      for (const [district, rows] of [['อ.จะนะ', liveRain.janah], ['อ.นาทวี', liveRain.nathawi]]) for (const s of rows) {
         if (!Number.isFinite(Number(s.lat)) || !Number.isFinite(Number(s.lon))) continue;
         const id = String(s.station_id ?? s.station_code ?? `${s.lat},${s.lon}`);
         if (!unique.has(id)) unique.set(id, {
           code: id === '2012' ? '58048' : `live-${id}`,
           stationId: id, name: s.name || 'สถานีวัดฝน', lat: Number(s.lat), lng: Number(s.lon),
-          district: 'อ.สงขลา', tambon: s.tambon || '', stationCode: s.station_code || '',
+          district: `${district} จ.สงขลา`, tambon: s.tambon || '', stationCode: s.station_code || '',
           rain24: Number.isFinite(Number(s.rain_24h)) && Number(s.rain_24h) >= 0 ? Number(s.rain_24h) : null,
           rain1: Number.isFinite(Number(s.rain_1h)) && Number(s.rain_1h) >= 0 ? Number(s.rain_1h) : null,
           datetime: s.datetime || '', source: 'FloodKTW'
@@ -157,6 +157,7 @@
         } else status.textContent = `พบสถานีมีพิกัด ${liveStations().length} แห่ง · ฟีดยังไม่มีค่ารายงานบ้านตลาดนาทวี · อัปเดตฟีด ${liveRain.generatedAt} · รีเฟรชทุก 5 นาที`;
         renderRainStations();
         render();
+        fitMapToCoverage();
       } catch (error) {
         liveRain = null;
         status.textContent = `ดึงค่าฝนอัตโนมัติไม่สำเร็จ (${error.message}) · แหล่งข้อมูล ${rainFeedUrl}`;
@@ -190,20 +191,27 @@
       return 12742 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
     function nearestStation(p) {
-      const stations = [...liveStations()];
-      for (const fixed of rainStations) if (!stations.some(s => distanceKm(s.lat, s.lng, fixed.lat, fixed.lng) < 0.5)) stations.push(fixed);
+      const stations = nearbyRainStations([p]);
       return stations.map(station => ({ station, km: distanceKm(p.lat, p.lng, station.lat, station.lng) })).sort((a, b) => a.km - b.km)[0];
     }
+    function nearbyRainStations(targetPoints = points) {
+      const stations = [...liveStations()];
+      for (const fixed of rainStations) if (!stations.some(s => distanceKm(s.lat, s.lng, fixed.lat, fixed.lng) < 0.5)) stations.push(fixed);
+      return stations.filter(s => targetPoints.some(p => distanceKm(p.lat, p.lng, s.lat, s.lng) <= 20));
+    }
+    function fitMapToCoverage() {
+      const positions = [...points.map(p => [p.lat, p.lng]), ...nearbyRainStations(points).map(s => [s.lat, s.lng])];
+      if (!positions.length) return;
+      map.fitBounds(L.latLngBounds(positions).pad(0.12), { maxZoom: 13, animate: true });
+      requestAnimationFrame(() => map.invalidateSize());
+    }
+    document.getElementById('fit-coverage').addEventListener('click', fitMapToCoverage);
     const rainLayer = L.layerGroup().addTo(map);
     const rainMarkers = new Map();
     function renderRainStations() {
       rainLayer.clearLayers();
       rainMarkers.clear();
-      const dynamic = liveStations();
-      const stations = [...dynamic];
-      for (const fixed of rainStations) {
-        if (!stations.some(s => distanceKm(s.lat, s.lng, fixed.lat, fixed.lng) < 0.5)) stations.push(fixed);
-      }
+      const stations = nearbyRainStations(points);
       for (const station of stations) {
         const isMarketStation = station.stationId === '2012' || station.code === '58048';
         const iconText = station.rain24 !== null && station.rain24 !== undefined ? `${station.rain24.toFixed(1)} มม.` : '💧';
@@ -373,7 +381,7 @@
     });
     document.getElementById('cancel').onclick = () => { reset(); render(); };
     render();
-    map.fitBounds(L.latLngBounds(startingPoints.map(p => [p.lat, p.lng])).pad(0.2));
+    fitMapToCoverage();
   </script>
 </body>
 </html>
