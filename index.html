@@ -40,7 +40,10 @@
     .flag-marker.primary { border-color: #facc15; box-shadow: 0 0 0 4px #facc1555, 0 2px 9px #123b5688; }
     .flag-marker.primary .flag-symbol { color: #facc15 !important; }
     .rain-marker { display: grid; place-items: center; width: 32px; height: 32px; border: 2px solid white; border-radius: 50%; background: #2563eb; color: white; box-shadow: 0 1px 7px #123b5688; font-size: 19px; }
+    .rain-marker.has-value { width: auto; min-width: 48px; padding: 0 5px; font-size: 12px; white-space: nowrap; }
     .rain-info { padding: 8px; margin: 6px 0; background: #eef5ff; border-radius: 7px; }
+    .rain-form { padding: 12px; margin: 12px 0; border: 1px solid #c7dbf4; border-radius: 8px; background: #f4f8ff; }
+    .rain-form h2 { margin: 0 0 4px; }
     @media (max-width: 700px) { main { display: flex; flex-direction: column; } aside { order: 2; } #map { height: 55vh; min-height: 350px; } }
   </style>
 </head>
@@ -62,7 +65,16 @@
         <button type="button" class="secondary" id="cancel" hidden>ยกเลิกการแก้ไข</button>
       </form>
       <div class="legend"><span><i class="dot" style="background:#64748b"></i>ยังไม่สำรวจ</span><span><i class="dot" style="background:#16a34a"></i>ปกติ</span><span><i class="dot" style="background:#f59e0b"></i>เฝ้าระวัง</span><span><i class="dot" style="background:#dc2626"></i>น้ำท่วม</span></div>
-      <small>หมุดสีน้ำเงิน 💧 = สถานีวัดน้ำฝน คลิกเพื่อดูรายละเอียด</small>
+      <small>หมุดสีน้ำเงิน 💧 = สถานีวัดน้ำฝน คลิกเพื่อดูรายละเอียด ตัวเลขบนหมุดเป็นค่าที่บันทึกด้วยตนเอง</small>
+      <form id="rain-form" class="rain-form">
+        <h2>บันทึกฝนสะสม 24 ชั่วโมง</h2>
+        <small>กรอกค่าจากรายงานการตรวจวัดจริง ไม่ใช่ฝนพยากรณ์ ค่าไม่แชร์ไปยังผู้เปิดเว็บคนอื่น</small>
+        <label for="rain-station">สถานี</label><select id="rain-station"></select>
+        <label for="rain-value">ฝนสะสม 24 ชม. (มม.)</label><input id="rain-value" type="number" min="0" step="any" required placeholder="ระบุค่าที่ตรวจวัด">
+        <label for="rain-time">เวลาสิ้นสุดการตรวจวัด</label><input id="rain-time" type="datetime-local" required>
+        <button type="submit">บันทึกค่าฝน</button>
+        <button type="button" class="secondary" id="rain-clear">ลบค่าที่บันทึกของสถานีนี้</button>
+      </form>
       <div id="points"></div>
       <small>สถานะเป็นข้อมูลที่ผู้ใช้กรอกเอง ไม่ใช่การแจ้งเตือนน้ำท่วมแบบเรียลไทม์ ข้อมูลสถานีเป็นพิกัดตามทะเบียน ไม่ใช่ปริมาณฝนสด ข้อมูลถนนและทางน้ำมาจาก OpenStreetMap และเก็บไว้ในเครื่อง ไม่อัปเดตอัตโนมัติ</small>
     </aside>
@@ -87,6 +99,24 @@
       { code: '58046', name: 'สถานีอุตุนิยมวิทยาอุทกสะเดา', lat: 6.789239, lng: 100.409727, district: 'อ.สะเดา จ.สงขลา', period: 'พ.ศ. 2547–ปัจจุบัน (ตามทะเบียนปี 2569)' }
     ];
     const stationSource = 'https://water.rid.go.th/hydrology/rain/images/Longlist_Rainfall.pdf#page=110';
+    const rainStorageKey = 'flood-watch-rainfall-v1';
+    let rainReadings = {};
+    try {
+      const saved = JSON.parse(localStorage.getItem(rainStorageKey));
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) rainReadings = saved;
+    } catch {}
+    function validRain(code) {
+      const reading = rainReadings[code];
+      return reading && typeof reading.mm === 'number' && Number.isFinite(reading.mm) && reading.mm >= 0 &&
+        typeof reading.time === 'string' && Number.isFinite(Date.parse(reading.time)) ? reading : null;
+    }
+    function rainDescription(code) {
+      const reading = validRain(code);
+      if (!reading) return 'ฝนสะสม 24 ชม.: ยังไม่มีข้อมูลที่บันทึก';
+      const age = Date.now() - Date.parse(reading.time);
+      const stale = age > 24 * 60 * 60 * 1000 ? ' (ข้อมูลเก่ากว่า 24 ชม.)' : '';
+      return `ฝนสะสม 24 ชม.: ${reading.mm.toFixed(1)} มม. · วัดถึง ${new Date(reading.time).toLocaleString('th-TH')}${stale} · ผู้ใช้กรอกเอง`;
+    }
     const storageKey = 'flood-watch-points-v1';
     let points;
     try {
@@ -116,18 +146,51 @@
       return rainStations.map(station => ({ station, km: distanceKm(p.lat, p.lng, station.lat, station.lng) })).sort((a, b) => a.km - b.km)[0];
     }
     const rainLayer = L.layerGroup().addTo(map);
-    for (const station of rainStations) {
-      const marker = L.marker([station.lat, station.lng], {
-        icon: L.divIcon({ className: 'leaflet-div-icon', html: '<span class="rain-marker">💧</span>', iconSize: [32, 32], iconAnchor: [16, 16] }),
-        title: `สถานีวัดน้ำฝน ${station.name}`
-      }).addTo(rainLayer);
-      const popup = document.createElement('div');
-      const title = document.createElement('strong'); title.textContent = `สถานีวัดน้ำฝน ${station.name}`;
-      const details = document.createElement('p'); details.textContent = `รหัส ${station.code} · ${station.district} · ${station.period} · ${station.lat.toFixed(6)}, ${station.lng.toFixed(6)}`;
-      const source = document.createElement('a'); source.href = stationSource; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'ทะเบียนสถานี กรมชลประทาน (PDF)';
-      popup.append(title, details, source);
-      marker.bindPopup(popup);
+    function renderRainStations() {
+      rainLayer.clearLayers();
+      for (const station of rainStations) {
+        const reading = validRain(station.code);
+        const iconText = reading ? `${reading.mm.toFixed(1)} มม.` : '💧';
+        const icon = L.divIcon({
+          className: 'leaflet-div-icon',
+          html: `<span class="rain-marker${reading ? ' has-value' : ''}">${iconText}</span>`,
+          iconSize: [reading ? 60 : 32, 32], iconAnchor: [reading ? 30 : 16, 16]
+        });
+        const marker = L.marker([station.lat, station.lng], { icon, title: `สถานีวัดน้ำฝน ${station.name}` }).addTo(rainLayer);
+        const popup = document.createElement('div');
+        const title = document.createElement('strong'); title.textContent = `สถานีวัดน้ำฝน ${station.name}`;
+        const details = document.createElement('p'); details.textContent = `รหัส ${station.code} · ${station.district} · ${station.period} · ${station.lat.toFixed(6)}, ${station.lng.toFixed(6)}`;
+        const value = document.createElement('p'); value.textContent = rainDescription(station.code);
+        const source = document.createElement('a'); source.href = stationSource; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'ทะเบียนสถานี กรมชลประทาน (PDF)';
+        popup.append(title, details, value, source);
+        marker.bindPopup(popup);
+      }
     }
+    const rainStationSelect = document.getElementById('rain-station');
+    for (const station of rainStations) rainStationSelect.add(new Option(`${station.name} (${station.code})`, station.code));
+    function fillRainForm() {
+      const reading = validRain(rainStationSelect.value);
+      document.getElementById('rain-value').value = reading ? reading.mm : '';
+      document.getElementById('rain-time').value = reading ? reading.time.slice(0, 16) : '';
+    }
+    rainStationSelect.addEventListener('change', fillRainForm);
+    document.getElementById('rain-form').addEventListener('submit', e => {
+      e.preventDefault();
+      const mm = Number(document.getElementById('rain-value').value);
+      const time = document.getElementById('rain-time').value;
+      if (!Number.isFinite(mm) || mm < 0 || !time || Date.parse(time) > Date.now()) { alert('ตรวจสอบค่าฝนและเวลา (เวลาต้องไม่อยู่ในอนาคต)'); return; }
+      rainReadings[rainStationSelect.value] = { mm, time };
+      try { localStorage.setItem(rainStorageKey, JSON.stringify(rainReadings)); }
+      catch { alert('ไม่สามารถบันทึกข้อมูลในเบราว์เซอร์ได้'); return; }
+      renderRainStations(); render();
+    });
+    document.getElementById('rain-clear').addEventListener('click', () => {
+      delete rainReadings[rainStationSelect.value];
+      try { localStorage.setItem(rainStorageKey, JSON.stringify(rainReadings)); }
+      catch { alert('ไม่สามารถบันทึกข้อมูลในเบราว์เซอร์ได้'); return; }
+      fillRainForm(); renderRainStations(); render();
+    });
+    fillRainForm(); renderRainStations();
     const layer = L.layerGroup().addTo(map);
     const form = document.getElementById('point-form');
     const coords = document.getElementById('coords');
@@ -209,8 +272,9 @@
         const rainInfo = document.createElement('div'); rainInfo.className = 'rain-info';
         const rainTitle = document.createElement('strong'); rainTitle.textContent = `💧 สถานีวัดฝนที่ยังดำเนินงานใกล้สุด: ${closest.station.name}`;
         const rainDetails = document.createElement('p'); rainDetails.textContent = `รหัส ${closest.station.code} · ระยะทางตรง ${closest.km.toFixed(1)} กม. · ${closest.station.district} · ${closest.station.period}`;
+        const rainfallValue = document.createElement('p'); rainfallValue.textContent = rainDescription(closest.station.code);
         const rainSource = document.createElement('a'); rainSource.href = stationSource; rainSource.target = '_blank'; rainSource.rel = 'noopener noreferrer'; rainSource.textContent = 'แหล่งข้อมูลสถานี';
-        rainInfo.append(rainTitle, rainDetails, rainSource);
+        rainInfo.append(rainTitle, rainDetails, rainfallValue, rainSource);
         row.append(rainInfo);
         if (p.updated) { const time = document.createElement('p'); time.textContent = `อัปเดต: ${new Date(p.updated).toLocaleString('th-TH')}`; row.append(time); }
         const button = document.createElement('button'); button.className = 'secondary'; button.textContent = 'ดู / แก้ไข'; button.onclick = () => edit(p.id); row.append(button);
